@@ -1,0 +1,195 @@
+---
+title: "191003_inclass_EDA"
+author: "Gavin Ko"
+date: "10/3/2019"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(viridis)
+knitr::opts_chunk$set(
+	echo = TRUE,
+	warning = FALSE,
+	fig.width = 8, 
+  fig.height = 6,
+  out.width = "90%"
+)
+options(
+  ggplot2.continuous.colour = "viridis",
+  ggplot2.continuous.fill = "viridis"
+)
+scale_colour_discrete = scale_colour_viridis_d
+scale_fill_discrete = scale_fill_viridis_d
+theme_set(theme_minimal() + theme(legend.position = "bottom"))
+```
+
+Group_by is like adding layer on the dataset, be aware.
+
+```{r create weather data}
+weather_df = 
+  rnoaa::meteo_pull_monitors(c("USW00094728", "USC00519397", "USS0023B17S"),
+                      var = c("PRCP", "TMIN", "TMAX"), 
+                      date_min = "2017-01-01",
+                      date_max = "2017-12-31") %>%
+  mutate(
+    name = recode(id, USW00094728 = "CentralPark_NY", 
+                      USC00519397 = "Waikiki_HA",
+                      USS0023B17S = "Waterhole_WA"),
+    tmin = tmin / 10,
+    tmax = tmax / 10,
+    month = lubridate::floor_date(date, unit = "month")) %>%
+  select(name, id, date, month, everything())
+```
+
+```{r first groupby function}
+weather_df %>%
+  group_by(name, month)
+```
+There's nothing new, or is there? The group index is on top of the dataset.
+When you put weather_df itself, it doesn't show the group_by layer.
+
+```{r groupby and observation}
+weather_df %>% 
+  group_by(month) %>% 
+  summarize(
+    n_obs = n(), #create new variable to accomodate existing values
+    n_unique = n_distinct(date)) #check distinct value
+```
+
+You don't need to do `group_by` and `summarize` every single time. 
+Let's use count.
+
+```{r count function}
+weather_df %>% 
+  count(name, month, name = "n_days") 
+#bad example of using name: it's a parameter to assign value column names.
+```
+
+How do you generate table?
+```{r Bad table}
+## don't ever do this
+## weather_df %>% 
+## pull(name) %>% 
+## table() 
+## Base R functions are not allowed.
+```
+```{r How do we really generate table}
+weather_df %>% 
+  count(name) %>% 
+  knitr::kable()
+```
+
+Created 2 x 2 table...
+```{r 2 x 2 table}
+weather_df %>% 
+  filter(name != "Waikiki_HA") %>% 
+  mutate(
+    cold = case_when( #just as ifelse, just choose what you like.
+      tmax < 5 ~ "cold",
+      tmax >= 5 ~ "not cold",
+      TRUE ~ ""
+    )
+  ) %>% 
+  group_by(name, cold) %>% 
+  count() %>% 
+  pivot_wider(
+    names_from = name,
+    values_from = cold
+  )
+```
+but it's 4 x 2, what are you taking about?
+
+```{r better way to do 2 x 2 table: tabyl}
+weather_df %>% 
+  filter(name != "Waikiki_HA") %>% 
+  mutate(
+    cold = case_when( 
+      tmax < 5 ~ "cold",
+      tmax >= 5 ~ "not cold",
+      TRUE ~ ""
+    )
+  ) %>% 
+  janitor::tabyl(name, cold) #tabyl package
+```
+Special note: Jeff is AGAINST 2 x 2 table.
+
+Let's move on to general summaries. 
+
+```{r}
+weather_df %>% 
+  group_by(name, month) %>% 
+  summarize(
+    n = n(),
+    mean_tmax = mean(tmax, na.rm = T),
+    sd_tmax = sd(tmax, na.rm = T),
+    median_prcp = median(tmax, na.rm = T)
+ ) %>% 
+  ggplot(aes (x = month, y = mean_tmax, color = name) ) + geom_point() + geom_line()
+# Waikiki has NA value because of 3 rows of missing data.
+# You cannot take mean of sth doesn't exist.
+# Double check before na.rm, see how did the NA's come from
+# multiple condition is also allowed
+```
+
+This is too complicated. Let's make it more simple.
+```{r}
+weather_df %>% 
+  group_by(name, month) %>% 
+  summarize(
+    n = n(),
+    mean_tmax = mean(tmax, na.rm = T),
+ ) %>% 
+  pivot_wider(
+    names_from = name,
+    values_from = mean_tmax
+  ) %>% 
+  knitr::kable(digits = 1) #rounding
+```
+
+Don't forget you can ungroup by using `ungroup()`!
+
+```{r}
+weather_df %>% 
+  group_by(name) %>% 
+  mutate(
+    mean_tmax = mean(tmax, na.rm = T), # specific to all value within each group
+    centered_tmax = tmax - mean_tmax
+  ) %>% 
+  ggplot(aes (x = date, y = centered_tmax, color = name)) + geom_point()
+
+```
+
+Window functions in group mutates, talking about rankings.
+
+```{r comparing the coldest days}
+weather_df %>% 
+  group_by(name, month) %>% 
+  mutate(
+    tmax_rank = min_rank(tmax) #min rank indicates the smaller comes in the front rank.
+  ) %>% 
+  filter(tmax_rank == 1)
+```
+For more information, check `?min_rank` for full set of variables.
+
+Next, let's check lags and leads.
+When we want to check the day by day differences, which location fluctuate the most, ...
+
+```{r}
+weather_df %>% 
+  group_by(name) %>% 
+  mutate(
+    lagged_tmax = lag(tmax), #copy all the information, shift by one row down
+    one_day_tmax_change = tmax - lagged_tmax,
+    leaded_tmax = lead(tmax) #the opposite of lagging
+  ) %>% 
+  summarize(
+    sd_daily_change = sd(one_day_tmax_change, na.rm = T)
+  )
+# don't forget, 'summarize' is not 'summary'
+```
+
+
+
+
+
